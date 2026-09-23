@@ -4,23 +4,22 @@ import html
 from typing import List
 
 import streamlit as st
-from google import genai
-from google.genai import types
+from openai import OpenAI
 from pydantic import BaseModel, Field
 
 # ================================================================
 # CAREER COMPASS AI
-# Install: py -m pip install -U streamlit google-genai pydantic
+# Install: py -m pip install -U streamlit openai pydantic
 # Run:     py -m streamlit run app.py
 # ================================================================
 
 # ================================================================
-# GEMINI API KEY - PASTE YOUR NEW KEY HERE FOR LOCAL TESTING
-# Better: set the GEMINI_API_KEY environment variable.
-# Do not reuse the key previously shared in chat.
+# NVIDIA NIM API CONFIGURATION
+# Recommended: set NVIDIA_API_KEY in environment variables or Streamlit secrets.
 # ================================================================
-GEMINI_API_KEY = "AQ.Ab8RN6LGx7usnT7rpkxg-AH8cqLFg2ZqqQlW6hIa5fy18g8kqw"
-MODEL_NAME = "gemini-flash-lite-latest"
+NVIDIA_API_KEY = "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"
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+MODEL_NAME = "deepseek-ai/deepseek-v4.1-flash"
 
 st.set_page_config(
     page_title="Career Compass AI",
@@ -150,17 +149,17 @@ def safe(value) -> str:
 
 
 def get_api_key() -> str:
-    env_key = os.getenv("GEMINI_API_KEY", "").strip()
+    env_key = os.getenv("NVIDIA_API_KEY", "").strip()
     if env_key:
         return env_key
     try:
-        secret_key = str(st.secrets.get("GEMINI_API_KEY", "")).strip()
+        secret_key = str(st.secrets.get("NVIDIA_API_KEY", "")).strip()
         if secret_key:
             return secret_key
     except Exception:
         pass
-    local_key = GEMINI_API_KEY.strip()
-    if local_key and local_key != "PASTE_YOUR_NEW_GEMINI_API_KEY_HERE":
+    local_key = NVIDIA_API_KEY.strip()
+    if local_key and local_key != "PASTE_YOUR_NVIDIA_API_KEY_HERE":
         return local_key
     return ""
 
@@ -181,9 +180,9 @@ def validate_profile(education: str, degree: str, skills: str, interests: str) -
 def analyze_career(education, degree, skills, interests, experience, work_preferences, location, goals):
     api_key = get_api_key()
     if not api_key:
-        raise ValueError("Gemini API key is missing.")
+        raise ValueError("NVIDIA API key is missing.")
 
-    client = genai.Client(api_key=api_key)
+    client = OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
     preferences = ", ".join(work_preferences) if work_preferences else "Not provided"
     experience_value = experience.strip() or "Not provided"
     location_value = location.strip() or "Not provided"
@@ -217,25 +216,23 @@ If important profile information is missing, say so in the important note.
 Keep the result specific, realistic, and actionable.
 """
 
-    response = client.models.generate_content(
+    schema = CareerAnalysis.model_json_schema()
+    response = client.chat.completions.create(
         model=MODEL_NAME,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.5,
-            response_mime_type="application/json",
-            response_schema=CareerAnalysis,
-        ),
+        messages=[
+            {"role": "system", "content": "Return ONLY valid JSON matching this schema exactly: " + json.dumps(schema)},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.5,
+        max_tokens=5000,
     )
-
-    parsed = getattr(response, "parsed", None)
-    if parsed is not None:
-        if isinstance(parsed, CareerAnalysis):
-            return parsed
-        return CareerAnalysis.model_validate(parsed)
-
-    if not response.text:
-        raise RuntimeError("Gemini returned an empty response.")
-    return CareerAnalysis.model_validate_json(response.text)
+    text = response.choices[0].message.content if response.choices else ""
+    if not text:
+        raise RuntimeError("NVIDIA NIM returned an empty response.")
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    return CareerAnalysis.model_validate_json(text)
 
 
 st.markdown(r"""
@@ -277,9 +274,9 @@ Create evidence of your skills
 """)
     st.divider()
     if get_api_key():
-        st.success("Gemini AI Connected")
+        st.success("NVIDIA AI Connected")
     else:
-        st.warning("Gemini API Key Missing")
+        st.warning("NVIDIA API Key Missing")
     st.caption("AI guidance is informational and does not guarantee career outcomes.")
 
 st.markdown('<div class="section-title">Build Your Career Profile</div>', unsafe_allow_html=True)
@@ -314,8 +311,8 @@ if analyze_button:
         for error in errors:
             st.warning(error)
     elif not get_api_key():
-        st.error("Gemini API key is missing.")
-        st.info('At the top of app.py, replace PASTE_YOUR_NEW_GEMINI_API_KEY_HERE with your NEW key, or set the GEMINI_API_KEY environment variable.')
+        st.error("NVIDIA API key is missing.")
+        st.info('At the top of app.py, replace PASTE_YOUR_NVIDIA_API_KEY_HERE with your NEW key, or set the NVIDIA_API_KEY environment variable.')
     else:
         progress = st.progress(10, text="Preparing your profile...")
         try:
@@ -328,7 +325,7 @@ if analyze_button:
         except Exception as error:
             progress.empty()
             st.error("Career analysis failed.")
-            st.info("Check your Gemini API key, internet connection, model access, and installed packages.")
+            st.info("Check your NVIDIA API key, internet connection, model access, and installed packages.")
             with st.expander("Technical Error Details"):
                 st.code(str(error))
 
